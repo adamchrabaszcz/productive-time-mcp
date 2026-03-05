@@ -9,7 +9,7 @@ This is a companion MCP to [berwickgeek/productive-mcp](https://github.com/berwi
 - **Time Entry Management**: Create, read, update, and delete time entries
 - **Time Reports**: Get hours summaries (worked, client, internal, holidays)
 - **Employee Hours**: Search employees by name and get their workload
-- **Smart Period Calculation**: Automatic month detection based on current date
+- **Billing Cutoff Logic**: Configurable automatic period selection for invoice workflows
 
 ## Installation
 
@@ -34,6 +34,23 @@ pip install git+https://github.com/adamchrabaszcz/productive-time-mcp
 | `PRODUCTIVE_API_TOKEN` | Yes | Your Productive.io API token |
 | `PRODUCTIVE_ORG_ID` | Yes | Your organization ID |
 | `PRODUCTIVE_USER_ID` | No | Your person ID (enables "me" references) |
+| `PRODUCTIVE_BILLING_CUTOFF_DAY` | No | Day of month when billing period switches (default: 10) |
+
+### Billing Cutoff Day
+
+The `PRODUCTIVE_BILLING_CUTOFF_DAY` controls automatic period selection for invoice processing:
+
+- **Before cutoff day**: Defaults to previous month (still processing invoices)
+- **From cutoff day onwards**: Defaults to current month
+
+Example with `PRODUCTIVE_BILLING_CUTOFF_DAY=10`:
+```
+Feb 28 → February (after cutoff, in Feb's billing window)
+Mar 1-9 → February (before cutoff, still in Feb's billing window)
+Mar 10+ → March (new billing period)
+```
+
+This is useful when processing invoices that arrive at month boundaries.
 
 ### Getting Your IDs
 

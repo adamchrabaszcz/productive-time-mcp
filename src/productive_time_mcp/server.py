@@ -1,15 +1,25 @@
 """FastMCP server for Productive.io time tracking."""
 
+import os
+
 from mcp.server.fastmcp import FastMCP
 
 from .api import get_client
-from .utils import calculate_period, format_hours, format_hours_response
+from .utils import calculate_period, format_hours, format_hours_response, DEFAULT_BILLING_CUTOFF_DAY
 
 # Create the MCP server
 mcp = FastMCP(
     "productive-time",
     dependencies=["httpx", "python-dateutil"],
 )
+
+
+def get_billing_cutoff_day() -> int:
+    """Get billing cutoff day from environment or default."""
+    try:
+        return int(os.environ.get("PRODUCTIVE_BILLING_CUTOFF_DAY", DEFAULT_BILLING_CUTOFF_DAY))
+    except ValueError:
+        return DEFAULT_BILLING_CUTOFF_DAY
 
 
 # ============================================================================
@@ -62,7 +72,14 @@ async def get_time_reports(
 
     Args:
         person_id: Person ID (defaults to current user if PRODUCTIVE_USER_ID is set)
-        period: "today", "week", "month", or "YYYY-MM" format
+        period: Period specification:
+            - "today": Current day
+            - "week": Current week (Mon-Sun)
+            - "month": Auto-selected based on billing cutoff day
+            - "current": Current calendar month
+            - "previous" / "last": Previous month
+            - "-N": N months ago (e.g., "-2")
+            - "YYYY-MM": Specific month
         after: Start date override (ISO format)
         before: End date override (ISO format)
 
@@ -79,7 +96,7 @@ async def get_time_reports(
     if after and before:
         start_date, end_date = after, before
     else:
-        start_date, end_date = calculate_period(period)
+        start_date, end_date = calculate_period(period, get_billing_cutoff_day())
 
     params = {
         "filter[after]": start_date,
@@ -118,7 +135,14 @@ async def get_time_entries(
 
     Args:
         person_id: Person ID (defaults to current user)
-        period: "today", "week", "month", or "YYYY-MM" format
+        period: Period specification:
+            - "today": Current day
+            - "week": Current week (Mon-Sun)
+            - "month": Auto-selected based on billing cutoff day
+            - "current": Current calendar month
+            - "previous" / "last": Previous month
+            - "-N": N months ago (e.g., "-2")
+            - "YYYY-MM": Specific month
         after: Start date override (ISO format)
         before: End date override (ISO format)
         service_type: Filter by service type ("internal", "client", etc.)
@@ -136,7 +160,7 @@ async def get_time_entries(
     if after and before:
         start_date, end_date = after, before
     else:
-        start_date, end_date = calculate_period(period)
+        start_date, end_date = calculate_period(period, get_billing_cutoff_day())
 
     params = {
         "filter[after]": start_date,
@@ -176,8 +200,14 @@ async def get_my_hours(period: str = "month") -> dict:
     Requires PRODUCTIVE_USER_ID environment variable to be set.
 
     Args:
-        period: "today", "week", "month", or "YYYY-MM" format.
-                Month uses smart logic: after 21st = current month, before = previous.
+        period: Period specification:
+            - "today": Current day
+            - "week": Current week (Mon-Sun)
+            - "month": Auto-selected based on billing cutoff day
+            - "current": Current calendar month
+            - "previous" / "last": Previous month
+            - "-N": N months ago (e.g., "-2")
+            - "YYYY-MM": Specific month
 
     Returns:
         Hours breakdown: worked, client, internal, paid_holiday, unpaid_holiday, total
@@ -193,20 +223,22 @@ async def get_my_hours(period: str = "month") -> dict:
 @mcp.tool()
 async def get_employee_hours(
     name: str,
-    month: str | None = None,
+    period: str | None = None,
     include_internal_notes: bool = True,
 ) -> dict:
     """
     Get hours summary for any employee by name.
 
     This is the primary tool for checking team member workload.
-    Mirrors the n8n workflow for workload approval.
 
     Args:
         name: Employee name or email (e.g., "John Doe" or "john.doe@company.com")
-        month: Optional month in "YYYY-MM" format. If not specified, uses smart defaults:
-               - After 21st of month: current month
-               - Before 21st: previous month
+        period: Period specification (optional, defaults to auto-selected billing period):
+            - "month": Auto-selected based on billing cutoff day (default)
+            - "current": Current calendar month
+            - "previous" / "last": Previous month
+            - "-N": N months ago (e.g., "-2")
+            - "YYYY-MM": Specific month
         include_internal_notes: Whether to fetch notes from internal time entries
 
     Returns:
@@ -222,11 +254,11 @@ async def get_employee_hours(
     person_id = person_result["id"]
     person_name = person_result["name"]
 
-    # Step 2: Calculate period
-    period = month if month else "month"
+    # Step 2: Calculate period (default to "month" which uses billing cutoff logic)
+    target_period = period if period else "month"
 
     # Step 3: Get time reports
-    report = await get_time_reports(person_id=person_id, period=period)
+    report = await get_time_reports(person_id=person_id, period=target_period)
     if "error" in report:
         return report
 
@@ -244,7 +276,7 @@ async def get_employee_hours(
     if include_internal_notes and report["hours"]["internal"] > 0:
         entries = await get_time_entries(
             person_id=person_id,
-            period=period,
+            period=target_period,
             service_type="internal",
         )
 

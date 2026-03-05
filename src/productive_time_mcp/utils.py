@@ -1,58 +1,99 @@
 """Utility functions for date handling and formatting."""
 
+import re
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 
+# Default cutoff day for billing period logic
+DEFAULT_BILLING_CUTOFF_DAY = 10
 
-def calculate_period(period: str = "month") -> tuple[str, str]:
+
+def get_month_range(target_date: date) -> tuple[str, str]:
+    """Get the first and last day of a month containing target_date."""
+    start = target_date.replace(day=1)
+    next_month = start + relativedelta(months=1)
+    end = next_month - timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
+
+def calculate_period(
+    period: str = "month",
+    billing_cutoff_day: int = DEFAULT_BILLING_CUTOFF_DAY,
+) -> tuple[str, str]:
     """
     Calculate date range for a given period.
 
-    Smart month logic (matching n8n workflow):
-    - After 21st: current month
-    - Before 21st: previous month
+    Automatic period selection for invoice processing:
+    - Before billing_cutoff_day: defaults to previous month
+    - From billing_cutoff_day onwards: defaults to current month
+
+    Example with billing_cutoff_day=10:
+        Mar 1-9:   → February (still in invoice window)
+        Mar 10-31: → March (new period)
 
     Args:
-        period: One of "today", "week", "month", or "YYYY-MM" format
+        period: One of:
+            - "today": Current day
+            - "week": Current week (Mon-Sun)
+            - "month" / "current": Current billing period (auto-selected)
+            - "previous" / "last": Previous month
+            - "-N": N months ago (e.g., "-2" for 2 months ago)
+            - "YYYY-MM": Specific month
+        billing_cutoff_day: Day of month when new billing period activates (1-28).
+            Before this day: defaults to previous month.
+            From this day onwards: defaults to current month.
 
     Returns:
         Tuple of (start_date, end_date) in ISO format
     """
     today = date.today()
 
+    # Today
     if period == "today":
         return today.isoformat(), today.isoformat()
 
+    # Current week (Monday to Sunday)
     if period == "week":
-        # Start of current week (Monday)
         start = today - timedelta(days=today.weekday())
-        # End of current week (Sunday)
         end = start + timedelta(days=6)
         return start.isoformat(), end.isoformat()
 
+    # Explicit current month (ignores billing cutoff)
+    if period == "current":
+        return get_month_range(today)
+
+    # Previous month
+    if period in ("previous", "last"):
+        prev_month = today.replace(day=1) - timedelta(days=1)
+        return get_month_range(prev_month)
+
+    # Relative months: -1, -2, -3, etc.
+    if re.match(r"^-\d+$", period):
+        months_ago = abs(int(period))
+        target = today - relativedelta(months=months_ago)
+        return get_month_range(target)
+
+    # Default "month" - uses billing cutoff logic
     if period == "month":
-        # Smart month logic: after 21st use current month, before use previous
-        if today.day >= 21:
-            target_month = today.replace(day=1)
+        if today.day >= billing_cutoff_day:
+            # We're past cutoff, use current month
+            return get_month_range(today)
         else:
-            target_month = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+            # Before cutoff, still processing previous month
+            prev_month = today.replace(day=1) - timedelta(days=1)
+            return get_month_range(prev_month)
 
-        # Get last day of target month
-        next_month = target_month + relativedelta(months=1)
-        end = next_month - timedelta(days=1)
-
-        return target_month.isoformat(), end.isoformat()
-
-    # Handle YYYY-MM format
+    # Explicit YYYY-MM format
     if len(period) == 7 and "-" in period:
-        year, month = map(int, period.split("-"))
-        start = date(year, month, 1)
-        next_month = start + relativedelta(months=1)
-        end = next_month - timedelta(days=1)
-        return start.isoformat(), end.isoformat()
+        try:
+            year, month = map(int, period.split("-"))
+            target = date(year, month, 1)
+            return get_month_range(target)
+        except ValueError:
+            pass
 
-    # Default to current month if unknown format
-    return calculate_period("month")
+    # Unknown format - fall back to default month logic
+    return calculate_period("month", billing_cutoff_day)
 
 
 def format_hours(minutes: int | float) -> float:
