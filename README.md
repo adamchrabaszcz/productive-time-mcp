@@ -16,13 +16,13 @@ This is a companion MCP to [berwickgeek/productive-mcp](https://github.com/berwi
 ### Using uvx (recommended)
 
 ```bash
-uvx --from git+https://github.com/YOUR_USERNAME/productive-time-mcp productive-time-mcp
+uvx --from git+https://github.com/adamchrabaszcz/productive-time-mcp productive-time-mcp
 ```
 
 ### Using pip
 
 ```bash
-pip install git+https://github.com/YOUR_USERNAME/productive-time-mcp
+pip install git+https://github.com/adamchrabaszcz/productive-time-mcp
 ```
 
 ## Configuration
@@ -61,7 +61,7 @@ Add to your `.mcp.json`:
   "mcpServers": {
     "productive-time": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/YOUR_USERNAME/productive-time-mcp", "productive-time-mcp"],
+      "args": ["--from", "git+https://github.com/adamchrabaszcz/productive-time-mcp", "productive-time-mcp"],
       "env": {
         "PRODUCTIVE_API_TOKEN": "${PRODUCTIVE_API_TOKEN}",
         "PRODUCTIVE_ORG_ID": "${PRODUCTIVE_ORG_ID}",
@@ -118,7 +118,7 @@ Add to your `.mcp.json`:
 
 ```bash
 # Clone and install
-git clone https://github.com/YOUR_USERNAME/productive-time-mcp
+git clone https://github.com/adamchrabaszcz/productive-time-mcp
 cd productive-time-mcp
 pip install -e ".[dev]"
 
