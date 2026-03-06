@@ -128,7 +128,7 @@ async def get_time_entries(
     period: str = "month",
     after: str | None = None,
     before: str | None = None,
-    service_type: str | None = None,
+    project_type_id: str | None = None,
 ) -> dict:
     """
     List time entries for a person over a period.
@@ -145,7 +145,7 @@ async def get_time_entries(
             - "YYYY-MM": Specific month
         after: Start date override (ISO format)
         before: End date override (ISO format)
-        service_type: Filter by service type ("internal", "client", etc.)
+        project_type_id: Filter by project type ("1" = internal, "2" = client)
 
     Returns:
         List of time entries with date, hours, note, service
@@ -168,8 +168,8 @@ async def get_time_entries(
         "filter[person_id]": target_person,
     }
 
-    if service_type:
-        params["filter[service_type]"] = service_type
+    if project_type_id:
+        params["filter[project_type_id]"] = project_type_id
 
     response = await client.get("reports/time_entry_reports", params)
 
@@ -277,7 +277,7 @@ async def get_employee_hours(
         entries = await get_time_entries(
             person_id=person_id,
             period=target_period,
-            service_type="internal",
+            project_type_id="1",  # 1 = internal projects
         )
 
         internal_notes = []
