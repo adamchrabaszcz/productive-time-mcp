@@ -7,9 +7,15 @@ import pytest
 
 from productive_time_mcp.utils import (
     calculate_period,
+    extract_relationship,
     format_hours,
     format_hours_response,
+    get_billing_cutoff_day,
+    resolve_date_range,
+    strip_html_tags,
     DEFAULT_BILLING_CUTOFF_DAY,
+    PROJECT_TYPE_INTERNAL,
+    PROJECT_TYPE_CLIENT,
 )
 
 
@@ -272,3 +278,222 @@ class TestFormatHoursResponse:
         result = format_hours_response(data, workday_hours=8, include_days=True)
         assert result["worked_days"] == 10.0
         assert result["total_days"] == 10.0
+
+
+class TestStripHtmlTags:
+    """Tests for strip_html_tags function."""
+
+    def test_basic_tags(self):
+        """Test stripping basic HTML tags."""
+        result = strip_html_tags("<p>Hello <b>world</b></p>")
+        assert result == "Hello world"
+
+    def test_list_items(self):
+        """Test converting list items to commas."""
+        result = strip_html_tags("<ul><li>Item 1</li><li>Item 2</li></ul>")
+        assert result == "Item 1, Item 2,"
+
+    def test_empty_string(self):
+        """Test with empty string."""
+        result = strip_html_tags("")
+        assert result == ""
+
+    def test_plain_text(self):
+        """Test with plain text (no HTML)."""
+        result = strip_html_tags("Just plain text")
+        assert result == "Just plain text"
+
+    def test_nested_tags(self):
+        """Test with nested tags."""
+        result = strip_html_tags("<div><p>Nested <span>content</span></p></div>")
+        assert result == "Nested content"
+
+    def test_whitespace_trimming(self):
+        """Test that result is trimmed."""
+        result = strip_html_tags("  <p>Text</p>  ")
+        assert result == "Text"
+
+
+class TestResolveDateRange:
+    """Tests for resolve_date_range function."""
+
+    def test_explicit_dates(self):
+        """Test with explicit after and before dates."""
+        start, end = resolve_date_range(
+            period="month",
+            after="2024-01-01",
+            before="2024-01-31",
+        )
+        assert start == "2024-01-01"
+        assert end == "2024-01-31"
+
+    def test_period_fallback(self):
+        """Test falling back to period calculation."""
+        start, end = resolve_date_range(period="2024-03")
+        assert start == "2024-03-01"
+        assert end == "2024-03-31"
+
+    def test_partial_dates_uses_period(self):
+        """Test that partial dates fall back to period."""
+        # Only after provided, not before
+        start, end = resolve_date_range(
+            period="2024-02",
+            after="2024-01-15",
+            before=None,
+        )
+        assert start == "2024-02-01"
+        assert end == "2024-02-29"
+
+    def test_custom_billing_cutoff(self):
+        """Test with custom billing cutoff day."""
+        with patch("productive_time_mcp.utils.date") as mock_date:
+            mock_date.today.return_value = date(2024, 3, 5)
+            mock_date.side_effect = lambda *args, **kw: date(*args, **kw)
+
+            # Day 5 with cutoff 15 should use previous month
+            start, end = resolve_date_range(period="month", billing_cutoff_day=15)
+            assert start == "2024-02-01"
+            assert end == "2024-02-29"
+
+
+class TestExtractRelationship:
+    """Tests for extract_relationship function."""
+
+    def test_relationship_found(self):
+        """Test extracting an existing relationship."""
+        entry = {
+            "relationships": {
+                "service": {"data": {"id": "svc-1", "type": "services"}},
+            },
+        }
+        included = {
+            "svc-1": {
+                "id": "svc-1",
+                "type": "services",
+                "attributes": {"name": "Development"},
+            },
+        }
+
+        result = extract_relationship(entry, "service", included, "name")
+
+        assert result is not None
+        assert result["id"] == "svc-1"
+        assert result["name"] == "Development"
+
+    def test_relationship_not_found(self):
+        """Test when relationship doesn't exist."""
+        entry = {"relationships": {}}
+        included = {}
+
+        result = extract_relationship(entry, "service", included, "name")
+
+        assert result is None
+
+    def test_relationship_not_in_included(self):
+        """Test when relationship exists but not in included."""
+        entry = {
+            "relationships": {
+                "service": {"data": {"id": "svc-1", "type": "services"}},
+            },
+        }
+        included = {}  # Empty included
+
+        result = extract_relationship(entry, "service", included, "name")
+
+        assert result is None
+
+    def test_custom_attribute_name(self):
+        """Test extracting a custom attribute."""
+        entry = {
+            "relationships": {
+                "task": {"data": {"id": "task-1", "type": "tasks"}},
+            },
+        }
+        included = {
+            "task-1": {
+                "id": "task-1",
+                "type": "tasks",
+                "attributes": {"title": "Feature X"},
+            },
+        }
+
+        result = extract_relationship(entry, "task", included, "title")
+
+        assert result is not None
+        assert result["id"] == "task-1"
+        assert result["title"] == "Feature X"
+
+
+class TestProjectTypeConstants:
+    """Tests for project type constants."""
+
+    def test_internal_project_type(self):
+        """Test internal project type constant."""
+        assert PROJECT_TYPE_INTERNAL == "1"
+
+    def test_client_project_type(self):
+        """Test client project type constant."""
+        assert PROJECT_TYPE_CLIENT == "2"
+
+
+class TestGetBillingCutoffDay:
+    """Tests for get_billing_cutoff_day function."""
+
+    def test_default_value(self, monkeypatch):
+        """Test default value when env var not set."""
+        monkeypatch.delenv("PRODUCTIVE_BILLING_CUTOFF_DAY", raising=False)
+        assert get_billing_cutoff_day() == DEFAULT_BILLING_CUTOFF_DAY
+
+    def test_custom_value(self, monkeypatch):
+        """Test custom value from env var."""
+        monkeypatch.setenv("PRODUCTIVE_BILLING_CUTOFF_DAY", "15")
+        assert get_billing_cutoff_day() == 15
+
+    def test_value_too_low(self, monkeypatch):
+        """Test value below valid range returns default with warning."""
+        monkeypatch.setenv("PRODUCTIVE_BILLING_CUTOFF_DAY", "0")
+        with pytest.warns(UserWarning, match="out of range"):
+            result = get_billing_cutoff_day()
+        assert result == DEFAULT_BILLING_CUTOFF_DAY
+
+    def test_value_too_high(self, monkeypatch):
+        """Test value above valid range returns default with warning."""
+        monkeypatch.setenv("PRODUCTIVE_BILLING_CUTOFF_DAY", "29")
+        with pytest.warns(UserWarning, match="out of range"):
+            result = get_billing_cutoff_day()
+        assert result == DEFAULT_BILLING_CUTOFF_DAY
+
+    def test_invalid_value(self, monkeypatch):
+        """Test non-integer value returns default."""
+        monkeypatch.setenv("PRODUCTIVE_BILLING_CUTOFF_DAY", "not-a-number")
+        assert get_billing_cutoff_day() == DEFAULT_BILLING_CUTOFF_DAY
+
+    def test_boundary_value_1(self, monkeypatch):
+        """Test minimum valid value (1)."""
+        monkeypatch.setenv("PRODUCTIVE_BILLING_CUTOFF_DAY", "1")
+        assert get_billing_cutoff_day() == 1
+
+    def test_boundary_value_28(self, monkeypatch):
+        """Test maximum valid value (28)."""
+        monkeypatch.setenv("PRODUCTIVE_BILLING_CUTOFF_DAY", "28")
+        assert get_billing_cutoff_day() == 28
+
+
+class TestFormatHoursEdgeCases:
+    """Additional edge case tests for format_hours."""
+
+    def test_negative_value(self):
+        """Test with negative value."""
+        result = format_hours(-60)
+        assert result == -1.0
+
+    def test_large_value(self):
+        """Test with large value (full month)."""
+        # 10000 minutes = 166.67 hours
+        result = format_hours(10000)
+        assert result == 166.67
+
+    def test_float_input(self):
+        """Test with float input."""
+        result = format_hours(90.5)
+        assert result == 1.51

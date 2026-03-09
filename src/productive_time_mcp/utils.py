@@ -1,11 +1,37 @@
 """Utility functions for date handling and formatting."""
 
+import os
 import re
+import warnings
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 
 # Default cutoff day for billing period logic
 DEFAULT_BILLING_CUTOFF_DAY = 10
+
+# Project type IDs from Productive.io
+PROJECT_TYPE_INTERNAL = "1"
+PROJECT_TYPE_CLIENT = "2"
+
+
+def get_billing_cutoff_day() -> int:
+    """Get billing cutoff day from environment or default.
+
+    Validates the value is between 1-28 to ensure it works for all months.
+
+    Returns:
+        Billing cutoff day (1-28)
+    """
+    try:
+        value = int(os.environ.get("PRODUCTIVE_BILLING_CUTOFF_DAY", DEFAULT_BILLING_CUTOFF_DAY))
+        if not 1 <= value <= 28:
+            warnings.warn(
+                f"PRODUCTIVE_BILLING_CUTOFF_DAY={value} out of range (1-28), using default {DEFAULT_BILLING_CUTOFF_DAY}"
+            )
+            return DEFAULT_BILLING_CUTOFF_DAY
+        return value
+    except ValueError:
+        return DEFAULT_BILLING_CUTOFF_DAY
 
 
 def get_month_range(target_date: date) -> tuple[str, str]:
@@ -94,6 +120,69 @@ def calculate_period(
 
     # Unknown format - fall back to default month logic
     return calculate_period("month", billing_cutoff_day)
+
+
+def strip_html_tags(text: str) -> str:
+    """Strip HTML tags from text, converting </li> to commas.
+
+    Args:
+        text: HTML text to clean
+
+    Returns:
+        Plain text with HTML tags removed
+    """
+    result = re.sub(r"</li>", ", ", text)
+    result = re.sub(r"<[^>]+>", "", result)
+    return result.strip()
+
+
+def resolve_date_range(
+    period: str = "month",
+    after: str | None = None,
+    before: str | None = None,
+    billing_cutoff_day: int = DEFAULT_BILLING_CUTOFF_DAY,
+) -> tuple[str, str]:
+    """Resolve date range from explicit dates or period.
+
+    Args:
+        period: Period specification (see calculate_period)
+        after: Explicit start date (ISO format)
+        before: Explicit end date (ISO format)
+        billing_cutoff_day: Day of month for billing cutoff
+
+    Returns:
+        Tuple of (start_date, end_date) in ISO format
+    """
+    if after and before:
+        return after, before
+    return calculate_period(period, billing_cutoff_day)
+
+
+def extract_relationship(
+    entry: dict,
+    rel_name: str,
+    included: dict,
+    attr_name: str = "name",
+) -> dict | None:
+    """Extract relationship data from JSON:API response.
+
+    Args:
+        entry: The entry containing relationships
+        rel_name: Name of the relationship to extract
+        included: Dict of included resources keyed by ID
+        attr_name: Attribute to extract from the related resource
+
+    Returns:
+        Dict with id and attribute value, or None if not found
+    """
+    rel = entry.get("relationships", {}).get(rel_name, {}).get("data")
+    if rel and rel["id"] in included:
+        resource = included[rel["id"]]
+        return {
+            "id": resource["id"],
+            attr_name: resource.get("attributes", {}).get(attr_name),
+        }
+    return None
 
 
 def format_hours(minutes: int | float) -> float:
