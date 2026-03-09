@@ -32,54 +32,61 @@ class ProductiveClient:
             "Content-Type": "application/vnd.api+json",
         }
 
+    async def _request(
+        self,
+        method: str,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Make HTTP request to Productive API.
+
+        Args:
+            method: HTTP method (get, post, patch, delete)
+            endpoint: API endpoint path
+            params: Query parameters (for GET requests)
+            data: JSON payload (for POST/PATCH requests)
+
+        Returns:
+            Response JSON or empty dict for DELETE
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            request_kwargs: dict[str, Any] = {
+                "headers": self.headers,
+            }
+            if params is not None:
+                request_kwargs["params"] = params
+            if data is not None:
+                request_kwargs["json"] = data
+
+            response = await getattr(client, method)(
+                f"{API_BASE}/{endpoint}",
+                **request_kwargs,
+            )
+            response.raise_for_status()
+            return response.json() if method != "delete" else {}
+
     async def get(
         self, endpoint: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """Make GET request to Productive API."""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                f"{API_BASE}/{endpoint}",
-                headers=self.headers,
-                params=params,
-            )
-            response.raise_for_status()
-            return response.json()
+        return await self._request("get", endpoint, params=params)
 
     async def post(
         self, endpoint: str, data: dict[str, Any]
     ) -> dict[str, Any]:
         """Make POST request to Productive API."""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{API_BASE}/{endpoint}",
-                headers=self.headers,
-                json=data,
-            )
-            response.raise_for_status()
-            return response.json()
+        return await self._request("post", endpoint, data=data)
 
     async def patch(
         self, endpoint: str, data: dict[str, Any]
     ) -> dict[str, Any]:
         """Make PATCH request to Productive API."""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.patch(
-                f"{API_BASE}/{endpoint}",
-                headers=self.headers,
-                json=data,
-            )
-            response.raise_for_status()
-            return response.json()
+        return await self._request("patch", endpoint, data=data)
 
-    async def delete(self, endpoint: str) -> bool:
+    async def delete(self, endpoint: str) -> dict[str, Any]:
         """Make DELETE request to Productive API."""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.delete(
-                f"{API_BASE}/{endpoint}",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return True
+        return await self._request("delete", endpoint)
 
 
 # Singleton client instance
@@ -92,3 +99,15 @@ def get_client() -> ProductiveClient:
     if _client is None:
         _client = ProductiveClient()
     return _client
+
+
+def reset_client() -> None:
+    """Reset the client singleton for testing."""
+    global _client
+    _client = None
+
+
+def set_client(client: ProductiveClient) -> None:
+    """Inject a custom client for testing."""
+    global _client
+    _client = client

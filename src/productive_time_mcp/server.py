@@ -1,25 +1,23 @@
 """FastMCP server for Productive.io time tracking."""
 
-import os
-
 from mcp.server.fastmcp import FastMCP
 
 from .api import get_client
-from .utils import calculate_period, format_hours, format_hours_response, DEFAULT_BILLING_CUTOFF_DAY
+from .utils import (
+    PROJECT_TYPE_INTERNAL,
+    extract_relationship,
+    format_hours,
+    format_hours_response,
+    get_billing_cutoff_day,
+    resolve_date_range,
+    strip_html_tags,
+)
 
 # Create the MCP server
 mcp = FastMCP(
     "productive-time",
     dependencies=["httpx", "python-dateutil"],
 )
-
-
-def get_billing_cutoff_day() -> int:
-    """Get billing cutoff day from environment or default."""
-    try:
-        return int(os.environ.get("PRODUCTIVE_BILLING_CUTOFF_DAY", DEFAULT_BILLING_CUTOFF_DAY))
-    except ValueError:
-        return DEFAULT_BILLING_CUTOFF_DAY
 
 
 # ============================================================================
@@ -92,11 +90,7 @@ async def get_time_reports(
     if not target_person:
         return {"error": "person_id is required (or set PRODUCTIVE_USER_ID)"}
 
-    # Calculate date range
-    if after and before:
-        start_date, end_date = after, before
-    else:
-        start_date, end_date = calculate_period(period, get_billing_cutoff_day())
+    start_date, end_date = resolve_date_range(period, after, before, get_billing_cutoff_day())
 
     params = {
         "filter[after]": start_date,
@@ -156,11 +150,7 @@ async def get_time_entries(
     if not target_person:
         return {"error": "person_id is required (or set PRODUCTIVE_USER_ID)"}
 
-    # Calculate date range
-    if after and before:
-        start_date, end_date = after, before
-    else:
-        start_date, end_date = calculate_period(period, get_billing_cutoff_day())
+    start_date, end_date = resolve_date_range(period, after, before, get_billing_cutoff_day())
 
     params = {
         "filter[after]": start_date,
@@ -277,17 +267,31 @@ async def get_employee_hours(
         entries = await get_time_entries(
             person_id=person_id,
             period=target_period,
-            project_type_id="1",  # 1 = internal projects
+            project_type_id=PROJECT_TYPE_INTERNAL,
         )
 
         internal_notes = []
         for entry in entries.get("entries", []):
-            if entry.get("note"):
-                internal_notes.append({
-                    "date": entry["date"],
-                    "hours": entry["hours"],
-                    "note": entry["note"],
-                })
+            # Extract real ID from composite report ID
+            # "time-entry-report-time_entry-133939949-hash" → "133939949"
+            entry_id = entry["id"]
+            if entry_id.startswith("time-entry-report"):
+                parts = entry_id.split("-")
+                actual_id = parts[4] if len(parts) > 4 else entry_id
+            else:
+                actual_id = entry_id
+
+            # Fetch full entry details to get note and service name
+            entry_details = await get_time_entry(actual_id)
+            if "error" not in entry_details:
+                note = entry_details.get("note")
+                if note:
+                    internal_notes.append({
+                        "date": entry_details.get("date"),
+                        "hours": entry_details.get("hours"),
+                        "service": entry_details.get("service", {}).get("name"),
+                        "note": strip_html_tags(note),
+                    })
 
         if internal_notes:
             result["internal_notes"] = internal_notes
@@ -325,7 +329,6 @@ async def get_time_entry(entry_id: str) -> dict:
 
     # Extract included resources
     included = {item["id"]: item for item in response.get("included", [])}
-    relationships = entry.get("relationships", {})
 
     result = {
         "id": entry["id"],
@@ -336,22 +339,14 @@ async def get_time_entry(entry_id: str) -> dict:
     }
 
     # Add service info if available
-    service_rel = relationships.get("service", {}).get("data")
-    if service_rel and service_rel["id"] in included:
-        service = included[service_rel["id"]]
-        result["service"] = {
-            "id": service["id"],
-            "name": service.get("attributes", {}).get("name"),
-        }
+    service = extract_relationship(entry, "service", included, "name")
+    if service:
+        result["service"] = service
 
     # Add task info if available
-    task_rel = relationships.get("task", {}).get("data")
-    if task_rel and task_rel["id"] in included:
-        task = included[task_rel["id"]]
-        result["task"] = {
-            "id": task["id"],
-            "title": task.get("attributes", {}).get("title"),
-        }
+    task_rel = extract_relationship(entry, "task", included, "title")
+    if task_rel:
+        result["task"] = {"id": task_rel["id"], "title": task_rel["title"]}
 
     return result
 
