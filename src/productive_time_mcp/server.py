@@ -272,8 +272,17 @@ async def get_employee_hours(
 
         internal_notes = []
         for entry in entries.get("entries", []):
+            # Extract real ID from composite report ID
+            # "time-entry-report-time_entry-133939949-hash" → "133939949"
+            entry_id = entry["id"]
+            if entry_id.startswith("time-entry-report"):
+                parts = entry_id.split("-")
+                actual_id = parts[4] if len(parts) > 4 else entry_id
+            else:
+                actual_id = entry_id
+
             # Fetch full entry details to get note and service name
-            entry_details = await get_time_entry(entry["id"])
+            entry_details = await get_time_entry(actual_id)
             if "error" not in entry_details:
                 note = entry_details.get("note")
                 if note:
