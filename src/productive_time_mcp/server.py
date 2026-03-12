@@ -183,21 +183,18 @@ async def get_time_entries(
 
 
 @mcp.tool()
-async def get_my_hours(period: str = "month") -> dict:
+async def get_my_hours(
+    after: str | None = None,
+    before: str | None = None,
+) -> dict:
     """
-    Get current user's hours summary for a period.
+    Get current user's hours summary.
 
     Requires PRODUCTIVE_USER_ID environment variable to be set.
 
     Args:
-        period: Period specification:
-            - "today": Current day
-            - "week": Current week (Mon-Sun)
-            - "month": Auto-selected based on billing cutoff day
-            - "current": Current calendar month
-            - "previous" / "last": Previous month
-            - "-N": N months ago (e.g., "-2")
-            - "YYYY-MM": Specific month
+        after: Start date (ISO format YYYY-MM-DD). If not provided, uses billing period default.
+        before: End date (ISO format YYYY-MM-DD). If not provided, uses billing period default.
 
     Returns:
         Hours breakdown: worked, client, internal, paid_holiday, unpaid_holiday, total
@@ -207,13 +204,14 @@ async def get_my_hours(period: str = "month") -> dict:
     if not client.user_id:
         return {"error": "PRODUCTIVE_USER_ID environment variable is required"}
 
-    return await get_time_reports(person_id=client.user_id, period=period)
+    return await get_time_reports(person_id=client.user_id, after=after, before=before)
 
 
 @mcp.tool()
 async def get_employee_hours(
     name: str,
-    period: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
     include_internal_notes: bool = True,
 ) -> dict:
     """
@@ -223,12 +221,8 @@ async def get_employee_hours(
 
     Args:
         name: Employee name or email (e.g., "John Doe" or "john.doe@company.com")
-        period: Period specification (optional, defaults to auto-selected billing period):
-            - "month": Auto-selected based on billing cutoff day (default)
-            - "current": Current calendar month
-            - "previous" / "last": Previous month
-            - "-N": N months ago (e.g., "-2")
-            - "YYYY-MM": Specific month
+        after: Start date (ISO format YYYY-MM-DD). If not provided, uses billing period default.
+        before: End date (ISO format YYYY-MM-DD). If not provided, uses billing period default.
         include_internal_notes: Whether to fetch notes from internal time entries
 
     Returns:
@@ -244,11 +238,8 @@ async def get_employee_hours(
     person_id = person_result["id"]
     person_name = person_result["name"]
 
-    # Step 2: Calculate period (default to "month" which uses billing cutoff logic)
-    target_period = period if period else "month"
-
-    # Step 3: Get time reports
-    report = await get_time_reports(person_id=person_id, period=target_period)
+    # Step 2: Get time reports (uses billing period default if no dates provided)
+    report = await get_time_reports(person_id=person_id, after=after, before=before)
     if "error" in report:
         return report
 
@@ -262,11 +253,12 @@ async def get_employee_hours(
         "hours": report["hours"],
     }
 
-    # Step 4: If has internal hours and include_internal_notes, get details
+    # Step 3: If has internal hours and include_internal_notes, get details
     if include_internal_notes and report["hours"]["internal"] > 0:
         entries = await get_time_entries(
             person_id=person_id,
-            period=target_period,
+            after=after,
+            before=before,
             project_type_id=PROJECT_TYPE_INTERNAL,
         )
 
