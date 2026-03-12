@@ -100,7 +100,7 @@ class TestGetTimeReports:
             }]
         }
 
-        result = await get_time_reports(person_id="123", period="2024-03")
+        result = await get_time_reports(person_id="123", after="2024-03-01", before="2024-03-31")
 
         assert result["person_id"] == "123"
         assert result["hours"]["worked"] == 160.0
@@ -156,7 +156,7 @@ class TestGetTimeEntries:
             ]
         }
 
-        result = await get_time_entries(person_id="123", period="2024-03")
+        result = await get_time_entries(person_id="123", after="2024-03-01", before="2024-03-31")
 
         assert result["person_id"] == "123"
         assert result["count"] == 2
@@ -196,7 +196,7 @@ class TestGetMyHours:
             }]
         }
 
-        result = await get_my_hours(period="week")
+        result = await get_my_hours(after="2024-03-04", before="2024-03-10")
 
         assert result["person_id"] == "user-123"
         assert result["hours"]["worked"] == 80.0
