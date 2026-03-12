@@ -1,6 +1,6 @@
 [project]
 name = "productive-time-mcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server for Productive.io time tracking"
 readme = "README.md"
 license = "MIT"

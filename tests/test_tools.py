@@ -198,8 +198,9 @@ class TestGetMyHours:
 
         result = await get_my_hours(after="2024-03-04", before="2024-03-10")
 
-        assert result["person_id"] == "user-123"
         assert result["hours"]["worked"] == 80.0
+        assert result["period"]["start"] == "2024-03-04"
+        assert result["period"]["end"] == "2024-03-10"
 
     @pytest.mark.asyncio
     async def test_get_my_hours_no_user_id(self, mock_client, monkeypatch):

@@ -21,6 +21,66 @@ mcp = FastMCP(
 
 
 # ============================================================================
+# Helper Functions
+# ============================================================================
+
+
+async def _add_internal_notes(
+    result: dict,
+    person_id: str,
+    after: str | None,
+    before: str | None,
+    hours: dict,
+    include: bool = True,
+) -> None:
+    """Add internal notes to result dict if applicable.
+
+    Args:
+        result: Result dict to modify (adds internal_notes key)
+        person_id: Person ID to fetch notes for
+        after: Start date (ISO format)
+        before: End date (ISO format)
+        hours: Hours dict with 'internal' key
+        include: Whether to include internal notes
+    """
+    if not include or hours.get("internal", 0) <= 0:
+        return
+
+    entries = await get_time_entries(
+        person_id=person_id,
+        after=after,
+        before=before,
+        project_type_id=PROJECT_TYPE_INTERNAL,
+    )
+
+    internal_notes = []
+    for entry in entries.get("entries", []):
+        # Extract real ID from composite report ID
+        # "time-entry-report-time_entry-133939949-hash" → "133939949"
+        entry_id = entry["id"]
+        if entry_id.startswith("time-entry-report"):
+            parts = entry_id.split("-")
+            actual_id = parts[4] if len(parts) > 4 else entry_id
+        else:
+            actual_id = entry_id
+
+        # Fetch full entry details to get note and service name
+        entry_details = await get_time_entry(actual_id)
+        if "error" not in entry_details:
+            note = entry_details.get("note")
+            if note:
+                internal_notes.append({
+                    "date": entry_details.get("date"),
+                    "hours": entry_details.get("hours"),
+                    "service": entry_details.get("service", {}).get("name"),
+                    "note": strip_html_tags(note),
+                })
+
+    if internal_notes:
+        result["internal_notes"] = internal_notes
+
+
+# ============================================================================
 # People Tools
 # ============================================================================
 
@@ -186,25 +246,42 @@ async def get_time_entries(
 async def get_my_hours(
     after: str | None = None,
     before: str | None = None,
+    include_internal_notes: bool = True,
 ) -> dict:
     """
-    Get current user's hours summary.
+    Get current user's hours summary with optional internal notes.
 
     Requires PRODUCTIVE_USER_ID environment variable to be set.
 
     Args:
         after: Start date (ISO format YYYY-MM-DD). If not provided, uses billing period default.
         before: End date (ISO format YYYY-MM-DD). If not provided, uses billing period default.
+        include_internal_notes: Whether to fetch notes from internal time entries
 
     Returns:
         Hours breakdown: worked, client, internal, paid_holiday, unpaid_holiday, total
+        Plus internal_notes if include_internal_notes=True and has internal hours
     """
     client = get_client()
 
     if not client.user_id:
         return {"error": "PRODUCTIVE_USER_ID environment variable is required"}
 
-    return await get_time_reports(person_id=client.user_id, after=after, before=before)
+    person_id = client.user_id
+
+    # Get time reports
+    report = await get_time_reports(person_id=person_id, after=after, before=before)
+    if "error" in report:
+        return report
+
+    result = {
+        "period": report["period"],
+        "hours": report["hours"],
+    }
+
+    await _add_internal_notes(result, person_id, after, before, report["hours"], include_internal_notes)
+
+    return result
 
 
 @mcp.tool()
@@ -253,40 +330,8 @@ async def get_employee_hours(
         "hours": report["hours"],
     }
 
-    # Step 3: If has internal hours and include_internal_notes, get details
-    if include_internal_notes and report["hours"]["internal"] > 0:
-        entries = await get_time_entries(
-            person_id=person_id,
-            after=after,
-            before=before,
-            project_type_id=PROJECT_TYPE_INTERNAL,
-        )
-
-        internal_notes = []
-        for entry in entries.get("entries", []):
-            # Extract real ID from composite report ID
-            # "time-entry-report-time_entry-133939949-hash" → "133939949"
-            entry_id = entry["id"]
-            if entry_id.startswith("time-entry-report"):
-                parts = entry_id.split("-")
-                actual_id = parts[4] if len(parts) > 4 else entry_id
-            else:
-                actual_id = entry_id
-
-            # Fetch full entry details to get note and service name
-            entry_details = await get_time_entry(actual_id)
-            if "error" not in entry_details:
-                note = entry_details.get("note")
-                if note:
-                    internal_notes.append({
-                        "date": entry_details.get("date"),
-                        "hours": entry_details.get("hours"),
-                        "service": entry_details.get("service", {}).get("name"),
-                        "note": strip_html_tags(note),
-                    })
-
-        if internal_notes:
-            result["internal_notes"] = internal_notes
+    # Step 3: Add internal notes if applicable
+    await _add_internal_notes(result, person_id, after, before, report["hours"], include_internal_notes)
 
     return result
 
